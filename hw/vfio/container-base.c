@@ -85,10 +85,8 @@ int vfio_container_dma_map(VFIOContainerBase *bcontainer,
         unsigned long start = vaddr - qemu_ram_get_host_addr(rb);
         unsigned long offset = qemu_ram_get_fd_offset(rb);
 
-        if (!vioc->dma_map_file(bcontainer, iova, size, mfd, start + offset,
-                                readonly)) {
-            return 0;
-        }
+        return vioc->dma_map_file(bcontainer, iova, size, mfd, start + offset,
+                                  readonly);
     }
     g_assert(vioc->dma_map);
     return vioc->dma_map(bcontainer, iova, size, vaddr, readonly, mr);
