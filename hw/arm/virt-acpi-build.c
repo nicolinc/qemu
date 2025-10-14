@@ -494,7 +494,7 @@ build_iort_rmr_nodes(GArray *table_data, GArray *smmuv3_devices, uint32_t *id)
         /* Table 19 Memory Range Descriptor */
 
         /* Physical Range offset */
-        build_append_int_noprefix(table_data, 0x8000000, 8);
+        build_append_int_noprefix(table_data, ARM_SMMUV3_MSI_BASE, 8);
         /* Physical Range length */
         build_append_int_noprefix(table_data, 0x100000, 8);
         build_append_int_noprefix(table_data, 0, 4); /* Reserved */

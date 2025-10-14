@@ -480,6 +480,13 @@ static bool smmuv3_accel_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
         return false;
     }
 
+    /* Must detach the device first to set SW_MSI options */
+    host_iommu_device_iommufd_detach_hwpt(idev, errp);
+    g_assert(iommufd_backend_set_sw_msi_start(idev->iommufd, idev->devid,
+                                              ARM_SMMUV3_MSI_BASE, NULL));
+    g_assert(iommufd_backend_set_sw_msi_size(idev->iommufd, idev->devid, 1,
+                                             NULL));
+
     if (!smmuv3_accel_dev_alloc_viommu(accel_dev, idev, errp)) {
         error_setg(errp, "Device 0x%x: Unable to alloc viommu", sid);
         return false;
