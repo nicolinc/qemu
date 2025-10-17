@@ -29,6 +29,7 @@
 #include "qemu/error-report.h"
 #include "qemu/units.h"
 #include "monitor/monitor.h"
+#include "system/ramblock.h"
 #include "vfio-helpers.h"
 
 /*
@@ -238,6 +239,42 @@ static void vfio_subregion_unmap(VFIORegion *region, int index)
     region->mmaps[index].mmap = NULL;
 }
 
+static int vfio_region_create_dma_buf(VFIORegion *region)
+{
+    struct vfio_device_feature_dma_buf *dma_buf;
+    struct vfio_device_feature *feature;
+    size_t total_size;
+    int i, ret;
+
+    total_size = sizeof(*feature) + sizeof(*dma_buf) +
+                 sizeof(struct vfio_region_dma_range) * region->nr_mmaps;
+    feature = g_malloc0(total_size);
+    *feature = (struct vfio_device_feature) {
+        .argsz = total_size,
+        .flags = VFIO_DEVICE_FEATURE_GET | VFIO_DEVICE_FEATURE_DMA_BUF,
+    };
+
+    dma_buf = (void *)feature->data;
+    *dma_buf = (struct vfio_device_feature_dma_buf) {
+        .region_index = region->nr,
+        .open_flags = O_RDWR,
+        .nr_ranges = region->nr_mmaps,
+    };
+
+    for (i = 0; i < region->nr_mmaps; i++) {
+        dma_buf->dma_ranges[i].offset = region->mmaps[i].offset;
+        dma_buf->dma_ranges[i].length = region->mmaps[i].size;
+    }
+
+    ret = ioctl(region->vbasedev->fd, VFIO_DEVICE_FEATURE, feature);
+
+    for (i = 0; i < region->nr_mmaps; i++) {
+        trace_vfio_region_dmabuf(region->vbasedev->name, region->mem->name,
+                                 region->mmaps[i].offset, region->mmaps[i].size);
+    }
+    return ret;
+}
+
 int vfio_region_mmap(VFIORegion *region)
 {
     int i, ret, prot = 0;
@@ -303,6 +340,17 @@ int vfio_region_mmap(VFIORegion *region)
                                region->mmaps[i].offset,
                                region->mmaps[i].offset +
                                region->mmaps[i].size - 1);
+    }
+
+    ret = vfio_region_create_dma_buf(region);
+    if (ret <= 0) {
+        error_report("%s: failed to create dmabuf: errno=%d",
+                     memory_region_name(&region->mmaps[0].mem), errno);
+    } else {
+        MemoryRegion *mr = &region->mmaps[0].mem;
+        RAMBlock *ram_block = mr->ram_block;
+
+        ram_block->fd = ret;
     }
 
     return 0;
