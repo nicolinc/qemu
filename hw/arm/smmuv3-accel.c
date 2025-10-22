@@ -439,6 +439,24 @@ out_free:
     return NULL;
 }
 
+static void smmuv3_accel_viommu_free_veventq(SMMUViommu *viommu)
+{
+    SMMUVeventq *veventq = viommu->veventq;
+
+    if (!veventq) {
+        return;
+    }
+
+    qemu_mutex_lock(&veventq->thread_mutex);
+    veventq->thread_stop = true;
+    qemu_mutex_unlock(&veventq->thread_mutex);
+
+    qemu_thread_join(&veventq->thread_id);
+    iommufd_backend_free_id(viommu->iommufd, veventq->core.veventq_id);
+    g_free(veventq);
+    viommu->veventq = NULL;
+}
+
 bool smmuv3_accel_realloc_veventq(SMMUv3State *s, uint32_t log2size,
                                   Error **errp)
 {
@@ -453,16 +471,7 @@ bool smmuv3_accel_realloc_veventq(SMMUv3State *s, uint32_t log2size,
     }
 
     viommu = s_accel->viommu;
-    veventq = viommu->veventq;
-    if (veventq) {
-        qemu_mutex_lock(&veventq->thread_mutex);
-        veventq->thread_stop = true;
-        qemu_mutex_unlock(&veventq->thread_mutex);
-        qemu_thread_join(&veventq->thread_id);
-        iommufd_backend_free_id(viommu->iommufd, veventq->core.veventq_id);
-        g_free(veventq);
-	viommu->veventq = NULL;
-    }
+    smmuv3_accel_viommu_free_veventq(viommu);
 
     if (!iommufd_backend_alloc_veventq(viommu->iommufd, viommu->core.viommu_id,
                                        IOMMU_VEVENTQ_TYPE_ARM_SMMUV3,
@@ -669,6 +678,7 @@ static void smmuv3_accel_unset_iommu_device(PCIBus *bus, void *opaque,
     }
 
     if (QLIST_EMPTY(&viommu->device_list)) {
+        smmuv3_accel_viommu_free_veventq(viommu);
         iommufd_backend_free_id(viommu->iommufd, viommu->bypass_hwpt_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->abort_hwpt_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->core.viommu_id);
