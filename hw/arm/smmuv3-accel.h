@@ -20,10 +20,17 @@
 #define TEGRA241_CMDQV_NUM_SID_PER_VM_LOG2 0x4
 typedef struct Tegra241CMDQV Tegra241CMDQV;
 
+typedef struct SMMUVeventq {
+    IOMMUFDVeventq core;
+    QemuThread thread_id;
+    QemuMutex thread_mutex;
+    bool thread_stop;
+} SMMUVeventq;
+
 typedef struct SMMUViommu {
     IOMMUFDBackend *iommufd;
     IOMMUFDViommu core;
-    IOMMUFDVeventq *veventq;
+    SMMUVeventq *veventq;
     uint32_t bypass_hwpt_id;
     uint32_t abort_hwpt_id;
     struct iommu_viommu_tegra241_cmdqv cmdqv_data;
@@ -46,9 +53,6 @@ typedef struct SMMUv3AccelDevice {
 
 typedef struct SMMUv3AccelState {
     SMMUViommu *viommu;
-    QemuThread event_thread_id;
-    QemuMutex event_thread_mutex;
-    bool event_thread_stop;
     struct iommu_hw_info_tegra241_cmdqv cmdqv_info;
     Tegra241CMDQV *cmdqv;
 } SMMUv3AccelState;

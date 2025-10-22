@@ -382,27 +382,28 @@ static void *smmuv3_accel_nested_event_thread(void *arg)
     SMMUv3State *s = arg;
     SMMUv3AccelState *s_accel = s->s_accel;
     SMMUViommu *viommu = s_accel->viommu;
+    SMMUVeventq *veventq = viommu->veventq;
     MemTxResult r;
     ssize_t bytes;
     Evt evt = {};
     void *buf;
     int ret;
 
-    if (!viommu->veventq) {
+    if (!veventq) {
         return NULL;
     }
 
     buf = g_malloc0(readsz);
     pollfd.events = POLLIN;
-    pollfd.fd = viommu->veventq->veventq_fd;
+    pollfd.fd = veventq->core.veventq_fd;
 
     while (1) {
-        qemu_mutex_lock(&s_accel->event_thread_mutex);
-        if (s_accel->event_thread_stop) {
-            qemu_mutex_unlock(&s_accel->event_thread_mutex);
+        qemu_mutex_lock(&veventq->thread_mutex);
+        if (veventq->thread_stop) {
+            qemu_mutex_unlock(&veventq->thread_mutex);
             break;
         }
-        qemu_mutex_unlock(&s_accel->event_thread_mutex);
+        qemu_mutex_unlock(&veventq->thread_mutex);
 
         ret = poll(&pollfd, 1, 100);
         if (ret < 0) {
@@ -442,7 +443,7 @@ bool smmuv3_accel_realloc_veventq(SMMUv3State *s, uint32_t log2size,
                                   Error **errp)
 {
     SMMUv3AccelState *s_accel = s->s_accel;
-    IOMMUFDVeventq *veventq;
+    SMMUVeventq *veventq;
     SMMUViommu *viommu;
     uint32_t veventq_id;
     uint32_t veventq_fd;
@@ -452,13 +453,15 @@ bool smmuv3_accel_realloc_veventq(SMMUv3State *s, uint32_t log2size,
     }
 
     viommu = s_accel->viommu;
-    if (viommu->veventq) {
-        qemu_mutex_lock(&s_accel->event_thread_mutex);
-        s_accel->event_thread_stop = true;
-        qemu_mutex_unlock(&s_accel->event_thread_mutex);
-        qemu_thread_join(&s_accel->event_thread_id);
-        iommufd_backend_free_id(viommu->iommufd, viommu->veventq->veventq_id);
-        g_free(viommu->veventq);
+    veventq = viommu->veventq;
+    if (veventq) {
+        qemu_mutex_lock(&veventq->thread_mutex);
+        veventq->thread_stop = true;
+        qemu_mutex_unlock(&veventq->thread_mutex);
+        qemu_thread_join(&veventq->thread_id);
+        iommufd_backend_free_id(viommu->iommufd, veventq->core.veventq_id);
+        g_free(veventq);
+	viommu->veventq = NULL;
     }
 
     if (!iommufd_backend_alloc_veventq(viommu->iommufd, viommu->core.viommu_id,
@@ -468,14 +471,16 @@ bool smmuv3_accel_realloc_veventq(SMMUv3State *s, uint32_t log2size,
         return false;
     }
 
-    veventq = g_new(IOMMUFDVeventq, 1);
-    veventq->veventq_id = veventq_id;
-    veventq->veventq_fd = veventq_fd;
-    veventq->viommu = &viommu->core;
+    veventq = g_new(SMMUVeventq, 1);
+    veventq->core.veventq_id = veventq_id;
+    veventq->core.veventq_fd = veventq_fd;
+    veventq->core.viommu = &viommu->core;
     viommu->veventq = veventq;
 
-    s_accel->event_thread_stop = false;
-    qemu_thread_create(&s_accel->event_thread_id, "irq/event",
+    qemu_mutex_init(&veventq->thread_mutex);
+    veventq->thread_stop = false;
+
+    qemu_thread_create(&veventq->thread_id, "irq/event",
                        smmuv3_accel_nested_event_thread, s,
                        QEMU_THREAD_JOINABLE);
     return true;
@@ -865,5 +870,4 @@ void smmuv3_accel_init(SMMUv3State *s)
 
     bs->iommu_ops = &smmuv3_accel_ops;
     s->s_accel = g_new0(SMMUv3AccelState, 1);
-    qemu_mutex_init(&s->s_accel->event_thread_mutex);
 }
