@@ -658,6 +658,11 @@ static void smmuv3_accel_unset_iommu_device(PCIBus *bus, void *opaque,
 
     sid = smmu_get_sid(sdev);
     accel_dev = container_of(sdev, SMMUv3AccelDevice, sdev);
+
+    if (accel_dev->s1_hwpt) {
+        smmuv3_accel_dev_uninstall_nested_ste(accel_dev, true, NULL);
+    }
+
     if (!host_iommu_device_iommufd_attach_hwpt(accel_dev->idev,
                                                accel_dev->idev->hwpt_id,
                                                NULL)) {
